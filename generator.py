@@ -7,6 +7,7 @@ from utils import load_model_and_tokenizer
 STOP_WORDS = ["<|im_end|>", "<|endoftext|>"]
 
 
+# Ref: https://github.com/QwenLM/Qwen2.5-Math/blob/main/evaluation/model_utils.py#L9
 class KeywordsStoppingCriteria(StoppingCriteria):
     def __init__(self, keywords_str, tokenizer):
         StoppingCriteria.__init__(self)
