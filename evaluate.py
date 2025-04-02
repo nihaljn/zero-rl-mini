@@ -5,6 +5,7 @@ import logging
 import os
 import re
 
+import numpy as np
 import randomname
 from datasets import load_dataset
 from tqdm import tqdm
@@ -17,6 +18,7 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s:%(lineno)d - %(message)s"
 )
 logger = logging.getLogger(__name__)
+K = [1, 5, 10, 20, 100]
 
 
 def prompt_formatter(input_text: str) -> str:
@@ -126,6 +128,20 @@ def process_sample(
     return output_dict
 
 
+def reduce_pass_at_k(results: list[dict]) -> dict:
+    """
+    Reduce the results from multiple samples into a single dict.
+    """
+    assert len(results) > 0, "No results to reduce"
+    reduced_results = {}
+    for k in K:
+        if f"pass@{k}" in results[0]["pass@k"]:
+            reduced_results[f"pass@{k}"] = np.mean([
+                result["pass@k"][f"pass@{k}"] for result in results
+            ]).item()
+    return reduced_results
+
+
 def main():
     # parse args
     parser = argparse.ArgumentParser()
@@ -133,20 +149,26 @@ def main():
     parser.add_argument("--max_samples", type=int, default=-1)
     parser.add_argument("--exp_name", type=str, default=None)
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--temperature", type=float, default=1.0)
+    parser.add_argument("--n_samples", type=int, default=1, 
+                        help="# sequences while generating")
     args = parser.parse_args()
 
     # set up
-    logger.info("Running with args: " + str(args))
     seed_everything(args.seed)
-    exp_name = args.exp_name if args.exp_name is not None else randomname.get_name()
-    output_dir = os.path.join(args.output_dir, exp_name)
+    args.exp_name = args.exp_name if args.exp_name is not None else randomname.get_name()
+    if args.temperature == 0.0 and args.n_samples != 1:
+        logger.warning("n_samples != 1 but temperature = 0.0; setting n_samples = 1")
+        args.n_samples = 1
+    logger.info("Running with args: " + str(args))
+    output_dir = os.path.join(args.output_dir, args.exp_name)
     if not os.path.exists(output_dir):
         logger.info(f"Creating output directory {output_dir}")
         os.makedirs(output_dir)
 
     # load the model
-    generator = Generator("Qwen/Qwen2.5-0.5B", temperature=1.0,
-                          n_samples=5, max_new_tokens=512)
+    generator = Generator("Qwen/Qwen2.5-0.5B", temperature=args.temperature,
+                          n_samples=args.n_samples, max_new_tokens=512)
 
     # load the data
     dataset_config = {
@@ -165,14 +187,16 @@ def main():
     # map each input to output
     output_file = os.path.join(output_dir, "results.jsonl")
     logger.info(f"Writing results to {output_file}")
+    outputs = []
     with open(output_file, "w") as f:
         for sample in tqdm(data, ncols=100, desc="Generating"):
             output = process_sample(
                 generator,
                 sample,
                 generator_return_type="dict",
-                ks=[1, 5]
+                ks=[k for k in K if k <= args.n_samples]
             )
+            outputs.append(output)
             logger.debug(f"Processed sample {sample['task_id']}")
             f.write(json.dumps(output) + "\n")
     
@@ -184,6 +208,14 @@ def main():
     config.update(dataset_config)
     with open(os.path.join(output_dir, "config.json"), "w") as f:
         json.dump(config, f, indent=4)
+
+    # write out overall results
+    agg_pass_at_k = reduce_pass_at_k(outputs)
+    logger.info(f"Overall results: {agg_pass_at_k}")
+    logger.info(f"Writing overall results to {output_dir}/results.json")
+    with open(os.path.join(output_dir, "results.json"), "w") as f:
+        json.dump(agg_pass_at_k, f, indent=4)
+    logger.info("Done!")
 
 
 if __name__ == "__main__":

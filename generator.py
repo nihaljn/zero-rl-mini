@@ -44,6 +44,7 @@ class Generator:
     ):
         self.model_name = model_name
         self.temperature = temperature
+        self.do_sample = temperature > 0.0
         self.n_samples = n_samples
         self.max_new_tokens = max_new_tokens
         self.model, self.tokenizer = load_model_and_tokenizer(model_name)
@@ -73,9 +74,9 @@ class Generator:
         gen_tokens = self.model.generate(
             tokenized.input_ids, # shape: [1, input_tokens]
             attention_mask=tokenized.attention_mask,
-            do_sample=True,
+            do_sample=self.do_sample,
             pad_token_id=self.tokenizer.eos_token_id,
-            temperature=self.temperature,
+            temperature=self.temperature if self.do_sample else 1.0,
             num_return_sequences=self.n_samples,
             max_new_tokens=self.max_new_tokens,
             stopping_criteria=StoppingCriteriaList([
