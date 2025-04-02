@@ -10,7 +10,7 @@ from datasets import load_dataset
 from tqdm import tqdm
 
 from generator import Generator
-from utils import pass_at_k
+from utils import pass_at_k, seed_everything
 
 logging.basicConfig(
     level=logging.INFO, 
@@ -132,9 +132,12 @@ def main():
     parser.add_argument("--output_dir", type=str, default="outputs/")
     parser.add_argument("--max_samples", type=int, default=-1)
     parser.add_argument("--exp_name", type=str, default=None)
+    parser.add_argument("--seed", type=int, default=0)
     args = parser.parse_args()
 
-    # set up output dir
+    # set up
+    logger.info("Running with args: " + str(args))
+    seed_everything(args.seed)
     exp_name = args.exp_name if args.exp_name is not None else randomname.get_name()
     output_dir = os.path.join(args.output_dir, exp_name)
     if not os.path.exists(output_dir):
