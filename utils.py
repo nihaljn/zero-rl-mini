@@ -7,6 +7,43 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 logger = logging.getLogger(__name__)
 
 
+def seed_everything(seed: int) -> None:
+    """
+    Set random seed for all libraries to ensure reproducibility.
+    
+    Args:
+        seed (int): Seed value to use
+    """
+    import random
+    import torch
+    import os
+    
+    # Set Python's random seed
+    random.seed(seed)
+    
+    # Set NumPy's random seed
+    np.random.seed(seed)
+    
+    # Set PyTorch's random seed for all devices (CPU, CUDA, MPS)
+    torch.manual_seed(seed)
+    
+    # If CUDA is available, set its seed too
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)  # For multi-GPU setups
+        
+        # These settings can improve reproducibility at the cost of performance
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
+    
+    # If MPS (Metal Performance Shaders for Mac) is available, set its seed
+    if hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+        torch.mps.manual_seed(seed)
+    
+    # Set environment variable for Python hash seed
+    os.environ['PYTHONHASHSEED'] = str(seed)
+
+
 def load_model_and_tokenizer(
     model_name: str
 ) -> tuple[AutoModelForCausalLM, AutoTokenizer]:
