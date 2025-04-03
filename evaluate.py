@@ -180,13 +180,15 @@ def evaluate(
         )
         for i in pbar:
             # generate
-            batch_samples = samples.select(range(i, i + num_samples_per_batch))
+            batch_samples = samples.select(
+                range(i, min(i + num_samples_per_batch, len(samples)))
+            )
             model_inputs_raw = [r["model_input_raw"] for r in batch_samples]
             this_outputs = generator.generate(
                 model_inputs_raw, return_type=generator_return_type
             )
             # score generations
-            for i in range(num_samples_per_batch):
+            for i in range(len(batch_samples)):
                 sample = batch_samples[i]
                 model_outputs_raw = this_outputs["model_outputs_raw"][i]
                 output_dict = {
