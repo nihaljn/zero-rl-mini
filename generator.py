@@ -52,15 +52,16 @@ class Generator:
         self.device = str(self.model.device)
     
     @torch.no_grad()
-    def generate(self, prompt: str, return_type: str = "str") -> list[str | dict]:
+    def generate(self, prompt: str | list[str], return_type: str = "str") -> list[str] | dict:
         """
         Generate a response from the model.
 
         Args:
-            prompt (str): The prompt to generate a response for.
+            prompt (str | list[str]): The prompt(s) to generate a response for.
             return_type (str) : Choices - ["str", "dict"].
-                                "str" returns a list of string responses (including input)
-                                "dict" returns a list of dict with various metadata
+                                "str" returns a list of list of string responses 
+                                (including input)
+                                "dict" returns a dict with various metadata
 
         Returns:
             str: The generated response.
@@ -72,7 +73,7 @@ class Generator:
         
         # generate
         gen_tokens = self.model.generate(
-            tokenized.input_ids, # shape: [1, input_tokens]
+            tokenized.input_ids, # shape: [bs, input_tokens]
             attention_mask=tokenized.attention_mask,
             do_sample=self.do_sample,
             pad_token_id=self.tokenizer.eos_token_id,
@@ -82,20 +83,25 @@ class Generator:
             stopping_criteria=StoppingCriteriaList([
                 KeywordsStoppingCriteria(self.stop_words, self.tokenizer)
             ])
-        ).to("cpu") # shape: [n_samples, input_tokens+new_tokens]
+        ).to("cpu") # shape: [bs*n_samples, input_tokens+new_tokens]
         
         # decode
-        gen_text_with_special_tokens = self.tokenizer.batch_decode(
+        gen_text = self.tokenizer.batch_decode(
             gen_tokens, skip_special_tokens=False
         )
+
+        # reshape
+        gen_text = [
+            gen_text[i*self.n_samples:(i+1)*self.n_samples]
+            for i in range(len(prompt))
+        ]
         
         # return
         if return_type == "str":
-            return gen_text_with_special_tokens
+            return gen_text
         elif return_type == "dict":
             output_dict = {
-                "model_input_raw": prompt,
-                "model_outputs_raw_with_special_tokens": gen_text_with_special_tokens,
+                "model_outputs_raw": gen_text,
             }
             return output_dict
         else:

@@ -7,7 +7,7 @@ import re
 
 import numpy as np
 import randomname
-from datasets import load_dataset
+from datasets import Dataset, load_dataset
 from tqdm import tqdm
 
 from generator import Generator
@@ -45,33 +45,21 @@ def response_extractor(model_output_raw: str) -> int:
         return -999999999 # indicating wrong response
 
 
-def process_sample(
-    generator: Generator,
+def score_model_outputs(
     sample: dict,
-    generator_return_type: str = "str",
+    model_outputs: list[str],
     ks: list[int] = [1]
 ) -> dict:
     """
-    Process a single sample. Do the following steps:
-        1. Preprocess the input
-        2. Get the model output
-        3. Postprocess the model output
-        4. Score the output
-        5. Return all the metadata about this run
+    Score outputs for a single sample.
 
     Args:
-        generator (Generator): The generator to use.
-        sample (dict): The sample to process.
-        generator_return_type (str) : Return type for the generator.
-                                      See `Generator` for more details.
+        sample (dict): The sample to process
+        model_outputs (list[str]): Raw outputs from the model
         ks (list[int]) : Values for which pass@k will be computed
 
     Returns:
         dict: Results from current evaluation. Includes - {
-                    "task_id": ...,
-                    "input_raw": ...,
-                    "model_input_raw: ...,
-                    "model_outputs_raw_with_special_tokens": [...],
                     "extracted_responses_raw": [...],
                     "extracted_responses_processed": [...],
                     "gt_response": ...,
@@ -79,24 +67,12 @@ def process_sample(
                     "pass@k": {k: score for k in [1, 5, ...]}
                 }
     """
-    # preprocess the input
-    question = sample["question"]
-    model_input_raw = prompt_formatter(question)
-    
-    # get the model output
-    output_dict = {
-        "task_id": sample["task_id"],
-        "input_raw": question,
-    }
-    if generator_return_type != "dict":
-        # TODO: add support later if needed
-        raise NotImplementedError
-    response = generator.generate(model_input_raw, return_type=generator_return_type)
-    output_dict.update(response)
-
-    # postprocess the model output
     extracted_responses_raw, extracted_responses_processed = [], []
-    for model_output_raw in response["model_outputs_raw_with_special_tokens"]:
+    output_dict = {}
+    model_input_raw = sample["model_input_raw"]
+    
+    # postprocess the model output
+    for model_output_raw in model_outputs:
         assert model_output_raw.startswith(model_input_raw), \
             f"Model input ({model_input_raw}) and output ({model_output_raw}) " \
              "are not aligned"
@@ -129,17 +105,81 @@ def process_sample(
 
 
 def reduce_pass_at_k(results: list[dict]) -> dict:
-    """
-    Reduce the results from multiple samples into a single dict.
-    """
+    """Reduce the results from multiple samples into a single dict."""
     assert len(results) > 0, "No results to reduce"
     reduced_results = {}
     for k in K:
-        if f"pass@{k}" in results[0]["pass@k"]:
+        if f"pass@{k}" in results[0]:
             reduced_results[f"pass@{k}"] = np.mean([
-                result["pass@k"][f"pass@{k}"] for result in results
+                result[f"pass@{k}"] for result in results
             ]).item()
     return reduced_results
+
+
+def preprocess_sample(sample: dict, index: int) -> dict:
+    """Preprocess sample so that it can be consumed by generation API"""
+    output_d = {
+        "task_id": f"gsm8k/test/{index}",
+        "model_input_raw": prompt_formatter(sample["question"])
+    }
+    return output_d
+
+
+def evaluate(
+    args: argparse.Namespace, 
+    samples: Dataset, 
+    generator: Generator,
+    generator_return_type: str = "str",
+    ks: list[int] = [1]
+):
+    """"""
+    # validation
+    if generator_return_type != "dict":
+        # TODO: add support later if needed
+        raise NotImplementedError
+    if args.batch_size < args.n_samples:
+        raise ValueError(
+            f"batch_size ({args.batch_size}) < n_samples ({args.n_samples})"
+        )
+
+    # setup
+    num_samples_per_batch = args.batch_size // args.n_samples
+    
+    # run evaluation
+    output_file = os.path.join(args.output_dir, "results.jsonl")
+    if os.path.exists(output_file) and not args.overwrite_if_exists:
+        mode = "a"
+        logger.info(f"Resuming writing results to {output_file}")
+    else:
+        mode = "w"
+        logger.info(f"Writing results to {output_file}")
+    with open(output_file, mode) as f:
+        pbar = tqdm(
+            range(0, len(samples), num_samples_per_batch),
+            desc="Generating",
+            ncols=100
+        )
+        for i in pbar:
+            # generate
+            batch_samples = samples.select(range(i, i + num_samples_per_batch))
+            model_inputs_raw = [r["model_input_raw"] for r in batch_samples]
+            this_outputs = generator.generate(
+                model_inputs_raw, return_type=generator_return_type
+            )
+            # score generations
+            for i in range(num_samples_per_batch):
+                sample = batch_samples[i]
+                model_outputs_raw = this_outputs["model_outputs_raw"][i]
+                output_dict = {
+                    "task_id": sample["task_id"],
+                    "model_input_raw": sample["model_input_raw"],
+                    "model_outputs_raw": model_outputs_raw,
+                }
+                this_score = score_model_outputs(
+                    sample, model_outputs_raw, ks=ks
+                )
+                output_dict.update(this_score)
+                f.write(json.dumps(output_dict) + "\n")
 
 
 def main():
@@ -152,6 +192,8 @@ def main():
     parser.add_argument("--temperature", type=float, default=1.0)
     parser.add_argument("--n_samples", type=int, default=1, 
                         help="# sequences while generating")
+    parser.add_argument("--batch_size", type=int, default=1)
+    parser.add_argument("--overwrite_if_exists", action="store_true")
     args = parser.parse_args()
 
     # set up
@@ -160,60 +202,69 @@ def main():
     if args.temperature == 0.0 and args.n_samples != 1:
         logger.warning("n_samples != 1 but temperature = 0.0; setting n_samples = 1")
         args.n_samples = 1
+    args.output_dir = os.path.join(args.output_dir, args.exp_name)
     logger.info("Running with args: " + str(args))
-    output_dir = os.path.join(args.output_dir, args.exp_name)
-    if not os.path.exists(output_dir):
-        logger.info(f"Creating output directory {output_dir}")
-        os.makedirs(output_dir)
-
-    # load the model
-    generator = Generator("Qwen/Qwen2.5-0.5B", temperature=args.temperature,
-                          n_samples=args.n_samples, max_new_tokens=512)
-
-    # load the data
+    if not os.path.exists(args.output_dir):
+        logger.info(f"Creating output directory {args.output_dir}")
+        os.makedirs(args.output_dir)
+    elif args.overwrite_if_exists:
+        logger.info(f"Output directory {args.output_dir} already exists; overwriting")
+        os.system(f"rm -rf {args.output_dir}/*")
     dataset_config = {
         "path": "openai/gsm8k",
         "name": "main",
         "split": "test",
     }
+
+    # load the model
+    generator = Generator("Qwen/Qwen2.5-0.5B", temperature=args.temperature,
+                          n_samples=args.n_samples, max_new_tokens=512)
+
+    # write out config            
+    logger.info(f"Writing config to {args.output_dir}/config.json")
+    config = {k: v for k, v in generator.__dict__.items() 
+                   if k not in ["model", "tokenizer"]}
+    config.update(dataset_config)
+    with open(os.path.join(args.output_dir, "config.json"), "w") as f:
+        json.dump(config, f, indent=4)
+
+    # load the data
     data = load_dataset(**dataset_config)
     if args.max_samples > 0:
         data = data.select(range(args.max_samples))
+    # preprocess data
+    data = data.map(preprocess_sample, with_indices=True)
+    if os.path.exists(os.path.join(args.output_dir, "results.jsonl")):
+        # collect completed task ids
+        completed_task_ids = set(
+            json.loads(l)["task_id"] 
+            for l in open(os.path.join(args.output_dir, "results.jsonl"))
+        )
+        logger.info(f"Found {len(completed_task_ids)} completed task ids")
+        # filter out completed task ids
+        data = data.filter(
+            lambda x: x["task_id"] not in completed_task_ids
+        )
     logger.info(f"Using {len(data)} samples for evaluation")
-    # add task identifiers
-    data = data.map(lambda x, i: {"task_id": i}, with_indices=True)
     logger.info("Loaded dataset with config " + str(dataset_config))
     
-    # map each input to output
-    output_file = os.path.join(output_dir, "results.jsonl")
-    logger.info(f"Writing results to {output_file}")
-    outputs = []
-    with open(output_file, "w") as f:
-        for sample in tqdm(data, ncols=100, desc="Generating"):
-            output = process_sample(
-                generator,
-                sample,
-                generator_return_type="dict",
-                ks=[k for k in K if k <= args.n_samples]
-            )
-            outputs.append(output)
-            logger.debug(f"Processed sample {sample['task_id']}")
-            f.write(json.dumps(output) + "\n")
-    
-    # write out config            
-    logger.info(f"Writing config to {output_dir}/config.json")
-    config = generator.__dict__
-    del config["model"]
-    del config["tokenizer"]
-    config.update(dataset_config)
-    with open(os.path.join(output_dir, "config.json"), "w") as f:
-        json.dump(config, f, indent=4)
+    # run evaluation
+    evaluate(
+        args,
+        data,
+        generator,
+        generator_return_type="dict",
+        ks=[k for k in K if k <= args.n_samples],
+    )
 
-    # write out overall results
-    agg_pass_at_k = reduce_pass_at_k(outputs)
+    # reduce scores
+    scores = [json.loads(l)["pass@k"] 
+              for l in open(os.path.join(args.output_dir, "results.jsonl"))]
+    agg_pass_at_k = reduce_pass_at_k(scores)
     logger.info(f"Overall results: {agg_pass_at_k}")
-    logger.info(f"Writing overall results to {output_dir}/results.json")
-    with open(os.path.join(output_dir, "results.json"), "w") as f:
+    output_file = os.path.join(args.output_dir, "results.json")
+    logger.info(f"Writing overall results to {output_file}")
+    with open(output_file, "w") as f:
         json.dump(agg_pass_at_k, f, indent=4)
     logger.info("Done!")
 
