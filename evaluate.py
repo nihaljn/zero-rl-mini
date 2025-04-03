@@ -106,7 +106,7 @@ def score_model_outputs(
     gt_line = sample["answer"].split("\n")[-1]
     assert gt_line.startswith("#### "), \
         f"Answer is not formatted correctly for {sample['task_id']}"
-    gt_response = int(gt_line.split("#### ")[-1])
+    gt_response = int(gt_line.split("#### ")[-1].replace(",", ""))
     response_scores = [
         int(response == gt_response) for response in extracted_responses_processed
     ]
