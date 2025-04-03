@@ -57,7 +57,7 @@ def load_model_and_tokenizer(
     Returns:
         tuple[AutoModelForCausalLM, AutoTokenizer]: The loaded model and tokenizer.
     """
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    tokenizer = AutoTokenizer.from_pretrained(model_name, padding_side="left")
     model = AutoModelForCausalLM.from_pretrained(
         model_name,
         device_map="auto"

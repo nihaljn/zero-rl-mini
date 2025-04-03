@@ -45,10 +45,26 @@ def response_extractor(model_output_raw: str) -> int:
         return -999999999 # indicating wrong response
 
 
+def strip_padding(
+    text: str, 
+    side: str = "left", 
+    pad_token: str = "<|endoftext|>"
+) -> str:
+    """Strip the left padding from the text"""
+    if side in ["left", "both"]:
+        while text.startswith(pad_token):
+            text = text[len(pad_token):]
+    if side in ["right", "both"]:
+        while text.endswith(pad_token):
+            text = text[:-len(pad_token)]
+    return text
+
+
 def score_model_outputs(
     sample: dict,
     model_outputs: list[str],
-    ks: list[int] = [1]
+    ks: list[int] = [1],
+    pad_token: str = "<|endoftext|>"
 ) -> dict:
     """
     Score outputs for a single sample.
@@ -73,6 +89,7 @@ def score_model_outputs(
     
     # postprocess the model output
     for model_output_raw in model_outputs:
+        model_output_raw = strip_padding(model_output_raw, "both", pad_token)
         assert model_output_raw.startswith(model_input_raw), \
             f"Model input ({model_input_raw}) and output ({model_output_raw}) " \
              "are not aligned"
@@ -176,7 +193,8 @@ def evaluate(
                     "model_outputs_raw": model_outputs_raw,
                 }
                 this_score = score_model_outputs(
-                    sample, model_outputs_raw, ks=ks
+                    sample, model_outputs_raw, ks=ks,
+                    pad_token=generator.tokenizer.pad_token
                 )
                 output_dict.update(this_score)
                 f.write(json.dumps(output_dict) + "\n")
