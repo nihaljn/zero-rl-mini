@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import re
+import sys
 
 import numpy as np
 import randomname
@@ -15,7 +16,8 @@ from utils import pass_at_k, seed_everything
 
 logging.basicConfig(
     level=logging.INFO, 
-    format="%(asctime)s [%(levelname)s] %(name)s:%(lineno)d - %(message)s"
+    format="%(asctime)s [%(levelname)s] %(name)s:%(lineno)d - %(message)s",
+    stream=sys.stdout
 )
 logger = logging.getLogger(__name__)
 K = [1, 5, 10, 20, 100]
