@@ -217,19 +217,27 @@ def main():
     args = parser.parse_args()
 
     # set up
-    seed_everything(args.seed)
     args.exp_name = args.exp_name if args.exp_name is not None else randomname.get_name()
-    if args.temperature == 0.0 and args.n_samples != 1:
-        logger.warning("n_samples != 1 but temperature = 0.0; setting n_samples = 1")
-        args.n_samples = 1
     args.output_dir = os.path.join(args.output_dir, args.exp_name)
-    logger.info("Running with args: " + str(args))
     if not os.path.exists(args.output_dir):
         logger.info(f"Creating output directory {args.output_dir}")
         os.makedirs(args.output_dir)
     elif args.overwrite_if_exists:
         logger.info(f"Output directory {args.output_dir} already exists; overwriting")
         os.system(f"rm -rf {args.output_dir}/*")
+    # update logger to also write to a file with the same format as above
+    handler = logging.FileHandler(os.path.join(args.output_dir, "log.txt"))
+    handler.setFormatter(logging.Formatter(
+        "%(asctime)s [%(levelname)s] %(name)s:%(lineno)d - %(message)s"
+    ))
+    logger.addHandler(handler)
+    
+    logger.info("Setting seed = " + str(args.seed) + " for reproducibility")
+    seed_everything(args.seed)
+    if args.temperature == 0.0 and args.n_samples != 1:
+        logger.warning("n_samples != 1 but temperature = 0.0; setting n_samples = 1")
+        args.n_samples = 1
+    logger.info("Running with args: " + str(args))
     dataset_config = {
         "path": "openai/gsm8k",
         "name": "main",
