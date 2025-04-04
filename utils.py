@@ -1,6 +1,7 @@
 import logging
 
 import numpy as np
+import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 
@@ -45,7 +46,9 @@ def seed_everything(seed: int) -> None:
 
 
 def load_model_and_tokenizer(
-    model_name: str
+    model_name: str,
+    dtype: type = torch.bfloat16,
+    load_in_half: bool = False
 ) -> tuple[AutoModelForCausalLM, AutoTokenizer]:
     """
     Load the model and tokenizer for the given model name and device.
@@ -60,8 +63,12 @@ def load_model_and_tokenizer(
     tokenizer = AutoTokenizer.from_pretrained(model_name, padding_side="left")
     model = AutoModelForCausalLM.from_pretrained(
         model_name,
-        device_map="auto"
+        device_map="auto",
+        torch_dtype=dtype,
     )
+    if load_in_half:
+        model = model.half()
+    model.eval()
     logger.info(f"Loaded model {model_name} on device {model.device}")
     return model, tokenizer
 

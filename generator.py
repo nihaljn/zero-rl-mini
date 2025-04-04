@@ -4,7 +4,8 @@ from transformers import StoppingCriteria, StoppingCriteriaList
 from utils import load_model_and_tokenizer
 
 
-STOP_WORDS = ["<|im_end|>", "<|endoftext|>"]
+# Ref: https://github.com/hkust-nlp/simpleRL-reason/blob/2d51057f0305cb7b47299affcd513d24e6417a2b/examples/simplelr_math_eval/math_eval.py#L270C28-L270C65
+STOP_WORDS = ["<|im_end|>", "<|endoftext|>", "assistant", "user", "_end", "_start"]
 
 
 # Ref: https://github.com/QwenLM/Qwen2.5-Math/blob/main/evaluation/model_utils.py#L9
@@ -15,23 +16,25 @@ class KeywordsStoppingCriteria(StoppingCriteria):
         self.tokenizer = tokenizer
         self.keywords_str = keywords_str
     
-    def __call__(self, input_ids: torch.LongTensor, scores: torch.FloatTensor, **kwargs) -> bool:
+    def __call__(self, input_ids: torch.LongTensor, scores: torch.FloatTensor, **kwargs) -> torch.Tensor:
         if len(self.current_context) == 0:
             self.current_context = [[] for _ in range(input_ids.shape[0])]
 
-        # self.current_context.append(input_ids[0][-1].item())
-        sequences_should_be_stopped = []
+        # Return a boolean tensor indicating which sequences should stop
+        should_stop = torch.zeros(input_ids.shape[0], dtype=torch.bool).to(input_ids.device)
+        
         for i in range(input_ids.shape[0]):
             _id = input_ids[i][-1].item()
             self.current_context[i].append(_id)
             current_context = self.tokenizer.decode(self.current_context[i])
-            should_be_stopped = False
+            
             for word in self.keywords_str:
                 if word in current_context:
-                    should_be_stopped = True
+                    should_stop[i] = True
                     break
-            sequences_should_be_stopped.append(should_be_stopped)
-        return all(sequences_should_be_stopped)
+        
+        # Don't return a single boolean - return a tensor indicating which sequences should stop
+        return should_stop
 
 
 class Generator:
@@ -40,14 +43,20 @@ class Generator:
         model_name: str,
         temperature: float = 1.0,
         n_samples: int = 1,
-        max_new_tokens: int = 512
+        max_new_tokens: int = 512,
+        model_dtype: type = torch.bfloat16,
+        load_in_half: bool = False
     ):
         self.model_name = model_name
         self.temperature = temperature
         self.do_sample = temperature > 0.0
         self.n_samples = n_samples
         self.max_new_tokens = max_new_tokens
-        self.model, self.tokenizer = load_model_and_tokenizer(model_name)
+        self.model_dtype = str(model_dtype)
+        self.load_in_half = load_in_half
+        self.model, self.tokenizer = load_model_and_tokenizer(
+            model_name, dtype=model_dtype, load_in_half=load_in_half
+        )
         self.stop_words = STOP_WORDS
         self.device = str(self.model.device)
     

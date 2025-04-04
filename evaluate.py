@@ -5,14 +5,18 @@ import logging
 import os
 import re
 import sys
+from functools import partial
+from typing import Callable
 
 import numpy as np
 import randomname
+import torch
 from datasets import Dataset, load_dataset
 from tqdm import tqdm
 
 from generator import Generator
 from utils import pass_at_k, seed_everything
+from external.parser import extract_answer
 
 logging.basicConfig(
     level=logging.INFO, 
@@ -35,7 +39,7 @@ def prompt_formatter(input_text: str) -> str:
     return input
 
 
-def response_extractor(model_output_raw: str) -> int:
+def boxed_response_extractor(model_output_raw: str) -> int:
     """Extract the response from the model output"""
     # expecting the response to be boxed, so extract the last boxed item in 
     # model output
@@ -66,7 +70,8 @@ def score_model_outputs(
     sample: dict,
     model_outputs: list[str],
     ks: list[int] = [1],
-    pad_token: str = "<|endoftext|>"
+    pad_token: str = "<|endoftext|>",
+    response_extractor: Callable = boxed_response_extractor
 ) -> dict:
     """
     Score outputs for a single sample.
@@ -149,7 +154,8 @@ def evaluate(
     samples: Dataset, 
     generator: Generator,
     generator_return_type: str = "str",
-    ks: list[int] = [1]
+    ks: list[int] = [1],
+    response_extractor: Callable = boxed_response_extractor
 ):
     """"""
     # validation
@@ -198,7 +204,8 @@ def evaluate(
                 }
                 this_score = score_model_outputs(
                     sample, model_outputs_raw, ks=ks,
-                    pad_token=generator.tokenizer.pad_token
+                    pad_token=generator.tokenizer.pad_token,
+                    response_extractor=response_extractor
                 )
                 output_dict.update(this_score)
                 f.write(json.dumps(output_dict) + "\n")
@@ -216,6 +223,8 @@ def main():
                         help="# sequences while generating")
     parser.add_argument("--batch_size", type=int, default=1)
     parser.add_argument("--overwrite_if_exists", action="store_true")
+    parser.add_argument("--response_extractor", type=str, default="boxed",
+                        choices=["boxed", "qwen"])
     args = parser.parse_args()
 
     # set up
@@ -239,6 +248,14 @@ def main():
     if args.temperature == 0.0 and args.n_samples != 1:
         logger.warning("n_samples != 1 but temperature = 0.0; setting n_samples = 1")
         args.n_samples = 1
+    if args.response_extractor == "boxed":
+        response_extractor = boxed_response_extractor
+    elif args.response_extractor == "qwen":
+        response_extractor = partial(
+            extract_answer, data_name="gsm8k", use_last_number=True
+        )
+    else:
+        raise NotImplementedError
     logger.info("Running with args: " + str(args))
     dataset_config = {
         "path": "openai/gsm8k",
@@ -248,7 +265,8 @@ def main():
 
     # load the model
     generator = Generator("Qwen/Qwen2.5-0.5B", temperature=args.temperature,
-                          n_samples=args.n_samples, max_new_tokens=512)
+                          n_samples=args.n_samples, max_new_tokens=512,
+                          model_dtype=torch.float16, load_in_half=True)
 
     # write out config            
     logger.info(f"Writing config to {args.output_dir}/config.json")
@@ -285,6 +303,7 @@ def main():
         generator,
         generator_return_type="dict",
         ks=[k for k in K if k <= args.n_samples],
+        response_extractor=response_extractor
     )
 
     # reduce scores
