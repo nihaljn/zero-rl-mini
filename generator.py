@@ -26,10 +26,15 @@ class KeywordsStoppingCriteria(StoppingCriteria):
         for i in range(input_ids.shape[0]):
             _id = input_ids[i][-1].item()
             self.current_context[i].append(_id)
-            current_context = self.tokenizer.decode(self.current_context[i])
+
+            # Only decode the last few tokens instead of the entire context
+            # This is much faster for long generations
+            max_context_to_check = 5  # Adjust based on your stop words
+            recent_ids = self.current_context[i][-max_context_to_check:]
+            recent_context = self.tokenizer.decode(recent_ids)
             
             for word in self.keywords_str:
-                if word in current_context:
+                if word in recent_context:
                     should_stop[i] = True
                     break
         
@@ -45,7 +50,8 @@ class Generator:
         n_samples: int = 1,
         max_new_tokens: int = 512,
         model_dtype: type = torch.bfloat16,
-        load_in_half: bool = False
+        load_in_half: bool = False,
+        use_compile: bool = False
     ):
         self.model_name = model_name
         self.temperature = temperature
@@ -55,7 +61,8 @@ class Generator:
         self.model_dtype = str(model_dtype)
         self.load_in_half = load_in_half
         self.model, self.tokenizer = load_model_and_tokenizer(
-            model_name, dtype=model_dtype, load_in_half=load_in_half
+            model_name, dtype=model_dtype, load_in_half=load_in_half,
+            use_compile=use_compile
         )
         self.stop_words = STOP_WORDS
         self.device = str(self.model.device)

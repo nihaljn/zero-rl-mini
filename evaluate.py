@@ -217,10 +217,15 @@ def main():
     parser.add_argument("--output_dir", type=str, default="outputs/")
     parser.add_argument("--max_samples", type=int, default=-1)
     parser.add_argument("--exp_name", type=str, default=None)
+    parser.add_argument("--load_in_half", action="store_true",
+                        help="Load model in half precision")
+    parser.add_argument("--use_compile", action="store_true",
+                        help="Compile model for faster inference")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--temperature", type=float, default=1.0)
     parser.add_argument("--n_samples", type=int, default=1, 
                         help="# sequences while generating")
+    parser.add_argument("--max_new_tokens", type=int, default=512)
     parser.add_argument("--batch_size", type=int, default=1)
     parser.add_argument("--overwrite_if_exists", action="store_true")
     parser.add_argument("--response_extractor", type=str, default="boxed",
@@ -264,9 +269,15 @@ def main():
     }
 
     # load the model
-    generator = Generator("Qwen/Qwen2.5-0.5B", temperature=args.temperature,
-                          n_samples=args.n_samples, max_new_tokens=512,
-                          model_dtype=torch.float16, load_in_half=True)
+    generator = Generator(
+        "Qwen/Qwen2.5-0.5B", 
+        temperature=args.temperature,
+        n_samples=args.n_samples, 
+        max_new_tokens=args.max_new_tokens,
+        model_dtype=torch.bfloat16, 
+        load_in_half=args.load_in_half, 
+        use_compile=args.use_compile
+    )
 
     # write out config            
     logger.info(f"Writing config to {args.output_dir}/config.json")

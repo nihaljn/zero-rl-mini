@@ -48,7 +48,8 @@ def seed_everything(seed: int) -> None:
 def load_model_and_tokenizer(
     model_name: str,
     dtype: type = torch.bfloat16,
-    load_in_half: bool = False
+    load_in_half: bool = False,
+    use_compile: bool = False
 ) -> tuple[AutoModelForCausalLM, AutoTokenizer]:
     """
     Load the model and tokenizer for the given model name and device.
@@ -66,6 +67,12 @@ def load_model_and_tokenizer(
         device_map="auto",
         torch_dtype=dtype,
     )
+    if use_compile and hasattr(torch, 'compile'):
+        try:
+            model = torch.compile(model)
+            logger.info("Model successfully compiled with torch.compile")
+        except Exception as e:
+            logger.warning(f"Failed to compile model: {e}")
     if load_in_half:
         model = model.half()
     model.eval()
