@@ -1,5 +1,5 @@
 import torch
-from transformers import StoppingCriteria, StoppingCriteriaList
+from transformers import AutoTokenizer, StoppingCriteria, StoppingCriteriaList
 
 from utils import load_model_and_tokenizer
 
@@ -10,11 +10,18 @@ STOP_WORDS = ["<|im_end|>", "<|endoftext|>", "assistant", "user", "_end", "_star
 
 # Ref: https://github.com/QwenLM/Qwen2.5-Math/blob/main/evaluation/model_utils.py#L9
 class KeywordsStoppingCriteria(StoppingCriteria):
-    def __init__(self, keywords_str, tokenizer):
+    def __init__(self, keywords_str: list[str], tokenizer: AutoTokenizer):
         StoppingCriteria.__init__(self)
         self.current_context = []
         self.tokenizer = tokenizer
         self.keywords_str = keywords_str
+        self.max_context_to_check = max(
+            len(self.tokenizer(word)["input_ids"])
+            for word in self.keywords_str
+        ) + 2 # some buffer
+
+    def reset(self):
+        self.current_context = []
     
     def __call__(self, input_ids: torch.LongTensor, scores: torch.FloatTensor, **kwargs) -> torch.Tensor:
         if len(self.current_context) == 0:
@@ -28,9 +35,7 @@ class KeywordsStoppingCriteria(StoppingCriteria):
             self.current_context[i].append(_id)
 
             # Only decode the last few tokens instead of the entire context
-            # This is much faster for long generations
-            max_context_to_check = 5  # Adjust based on your stop words
-            recent_ids = self.current_context[i][-max_context_to_check:]
+            recent_ids = self.current_context[i][-self.max_context_to_check:]
             recent_context = self.tokenizer.decode(recent_ids)
             
             for word in self.keywords_str:
@@ -65,6 +70,9 @@ class Generator:
             use_compile=use_compile
         )
         self.stop_words = STOP_WORDS
+        self.stopping_criteria = StoppingCriteriaList([
+            KeywordsStoppingCriteria(self.stop_words, self.tokenizer)
+        ])
         self.device = str(self.model.device)
     
     @torch.no_grad()
@@ -88,6 +96,7 @@ class Generator:
         ).to(self.device) 
         
         # generate
+        self.stopping_criteria.reset()
         gen_tokens = self.model.generate(
             tokenized.input_ids, # shape: [bs, input_tokens]
             attention_mask=tokenized.attention_mask,
@@ -96,9 +105,7 @@ class Generator:
             temperature=self.temperature if self.do_sample else 1.0,
             num_return_sequences=self.n_samples,
             max_new_tokens=self.max_new_tokens,
-            stopping_criteria=StoppingCriteriaList([
-                KeywordsStoppingCriteria(self.stop_words, self.tokenizer)
-            ])
+            stopping_criteria=self.stopping_criteria
         ).to("cpu") # shape: [bs*n_samples, input_tokens+new_tokens]
         
         # decode
