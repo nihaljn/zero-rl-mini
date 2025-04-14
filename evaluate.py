@@ -230,6 +230,7 @@ def main():
     parser.add_argument("--overwrite_if_exists", action="store_true")
     parser.add_argument("--response_extractor", type=str, default="boxed",
                         choices=["boxed", "qwen"])
+    parser.add_argument("--ckpt_path", type=str, default=None)
     args = parser.parse_args()
 
     # set up
@@ -276,13 +277,14 @@ def main():
         max_new_tokens=args.max_new_tokens,
         model_dtype=torch.bfloat16, 
         load_in_half=args.load_in_half, 
-        use_compile=args.use_compile
+        use_compile=args.use_compile,
+        ckpt_path=args.ckpt_path
     )
 
     # write out config            
     logger.info(f"Writing config to {args.output_dir}/config.json")
     config = {k: v for k, v in generator.__dict__.items() 
-                   if k not in ["model", "tokenizer"]}
+                   if k not in ["model", "tokenizer", "stopping_criteria"]}
     config.update(dataset_config)
     with open(os.path.join(args.output_dir, "config.json"), "w") as f:
         json.dump(config, f, indent=4)

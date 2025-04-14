@@ -56,7 +56,8 @@ class Generator:
         max_new_tokens: int = 512,
         model_dtype: type = torch.bfloat16,
         load_in_half: bool = False,
-        use_compile: bool = False
+        use_compile: bool = False,
+        ckpt_path: str | None = None
     ):
         self.model_name = model_name
         self.temperature = temperature
@@ -67,7 +68,7 @@ class Generator:
         self.load_in_half = load_in_half
         self.model, self.tokenizer = load_model_and_tokenizer(
             model_name, dtype=model_dtype, load_in_half=load_in_half,
-            use_compile=use_compile
+            use_compile=use_compile, ckpt_path=ckpt_path
         )
         self.stop_words = STOP_WORDS
         self.stopping_criteria = StoppingCriteriaList([
@@ -96,7 +97,7 @@ class Generator:
         ).to(self.device) 
         
         # generate
-        self.stopping_criteria.reset()
+        self.stopping_criteria[0].reset()
         gen_tokens = self.model.generate(
             tokenized.input_ids, # shape: [bs, input_tokens]
             attention_mask=tokenized.attention_mask,

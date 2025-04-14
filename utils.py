@@ -49,7 +49,8 @@ def load_model_and_tokenizer(
     model_name: str,
     dtype: type = torch.bfloat16,
     load_in_half: bool = False,
-    use_compile: bool = False
+    use_compile: bool = False,
+    ckpt_path: str | None = None
 ) -> tuple[AutoModelForCausalLM, AutoTokenizer]:
     """
     Load the model and tokenizer for the given model name and device.
@@ -62,8 +63,10 @@ def load_model_and_tokenizer(
         tuple[AutoModelForCausalLM, AutoTokenizer]: The loaded model and tokenizer.
     """
     tokenizer = AutoTokenizer.from_pretrained(model_name, padding_side="left")
+    if ckpt_path is None:
+        ckpt_path = model_name
     model = AutoModelForCausalLM.from_pretrained(
-        model_name,
+        ckpt_path,
         device_map="auto",
         torch_dtype=dtype,
     )
